@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: osint-admin-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: PORT
+        value: 8001
+      - key: ADMIN_BOT_TOKEN
+        sync: false  # Set manually in Render dashboard - DIFFERENT TOKEN!
+      - key: ADMIN_BOT_USERNAME
+        value: subscriptionOSINTbot
+      - key: ADMIN_USER_ID
+        value: "5682019164"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false  # Same as main bot (for database access only)
+      - key: BOT_USERNAME
+        value: reosintbot
+      - key: LOG_LEVEL
+        value: INFO
