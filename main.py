@@ -410,9 +410,18 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
             active_users = self.db.get_all_active_users()
             total_revenue = len(active_users) * self.subscription_price
             
-            # Get total users from Supabase
-            all_users = self.db.supabase.table('users').select('user_id').execute()
-            total_users = len(all_users.data) if all_users.data else 0
+            # Get total users based on database type
+            if hasattr(self.db, 'use_sqlite') and self.db.use_sqlite:
+                # SQLite fallback mode
+                import sqlite3
+                with sqlite3.connect(self.db.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT COUNT(*) FROM users')
+                    total_users = cursor.fetchone()[0]
+            else:
+                # Supabase mode
+                all_users = self.db.supabase.table('users').select('user_id').execute()
+                total_users = len(all_users.data) if all_users.data else 0
             
             message = f"""
 📊 **OSINT Bot Statistics**
@@ -525,35 +534,69 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
     async def show_all_users(self, query):
         """Show all users list"""
         try:
-            # Get all users from Supabase database
-            users = self.db.supabase.table('users').select(
-                'user_id, username, first_name, subscription_status, created_at'
-            ).order('created_at', desc=True).limit(15).execute()
-            
-            if not users.data:
-                text = "📭 <b>No Users Found</b>\n\nNo users in the database yet."
-            else:
-                text = f"📋 <b>All Users ({len(users.data)} shown)</b>\n\n"
+            # Check if using Supabase or SQLite
+            if hasattr(self.db, 'use_sqlite') and self.db.use_sqlite:
+                # SQLite fallback mode
+                import sqlite3
+                with sqlite3.connect(self.db.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT user_id, username, first_name, subscription_status, created_at
+                        FROM users 
+                        ORDER BY created_at DESC
+                        LIMIT 15
+                    ''')
+                    users_data = cursor.fetchall()
                 
-                for i, user in enumerate(users.data, 1):
-                    user_id = user['user_id']
-                    username = user.get('username')
-                    first_name = user.get('first_name')
-                    status = user.get('subscription_status', 'inactive')
-                    created = user.get('created_at', '')
+                if not users_data:
+                    text = "📭 <b>No Users Found</b>\n\nNo users in the database yet."
+                else:
+                    text = f"📋 <b>All Users ({len(users_data)} shown)</b>\n\n"
                     
-                    status_emoji = {'active': '✅', 'expired': '⏰', 'inactive': '🔒'}.get(status, '❓')
+                    for i, user in enumerate(users_data, 1):
+                        user_id, username, first_name, status, created = user
+                        status_emoji = {'active': '✅', 'expired': '⏰', 'inactive': '🔒'}.get(status, '❓')
+                        
+                        # Better user display logic
+                        if username:
+                            user_display = f"@{username}"
+                        elif first_name and first_name != 'Unknown User':
+                            user_display = first_name
+                        else:
+                            user_display = f"User {user_id}"
+                        
+                        text += f"{i}. {status_emoji} {user_display}\n"
+                        text += f"   ID: <code>{user_id}</code> | Joined: {created[:10] if created else 'Unknown'}\n\n"
+            else:
+                # Supabase mode
+                users = self.db.supabase.table('users').select(
+                    'user_id, username, first_name, subscription_status, created_at'
+                ).order('created_at', desc=True).limit(15).execute()
+                
+                if not users.data:
+                    text = "📭 <b>No Users Found</b>\n\nNo users in the database yet."
+                else:
+                    text = f"📋 <b>All Users ({len(users.data)} shown)</b>\n\n"
                     
-                    # Better user display logic
-                    if username:
-                        user_display = f"@{username}"
-                    elif first_name and first_name != 'Unknown User':
-                        user_display = first_name
-                    else:
-                        user_display = f"User {user_id}"
-                    
-                    text += f"{i}. {status_emoji} {user_display}\n"
-                    text += f"   ID: <code>{user_id}</code> | Joined: {created[:10] if created else 'Unknown'}\n\n"
+                    for i, user in enumerate(users.data, 1):
+                        user_id = user['user_id']
+                        username = user.get('username')
+                        first_name = user.get('first_name')
+                        status = user.get('subscription_status', 'inactive')
+                        created = user.get('created_at', '')
+                        
+                        status_emoji = {'active': '✅', 'expired': '⏰', 'inactive': '🔒'}.get(status, '❓')
+                        
+                        # Better user display logic
+                        if username:
+                            user_display = f"@{username}"
+                        elif first_name and first_name != 'Unknown User':
+                            user_display = first_name
+                        else:
+                            user_display = f"User {user_id}"
+                        
+                        text += f"{i}. {status_emoji} {user_display}\n"
+                        text += f"   ID: <code>{user_id}</code> | Joined: {created[:10] if created else 'Unknown'}\n\n"
             
             await query.edit_message_text(text, parse_mode='HTML')
             
@@ -566,9 +609,18 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
         try:
             active_users = self.db.get_all_active_users()
             
-            # Get user statistics from Supabase
-            all_users = self.db.supabase.table('users').select('*').execute()
-            total_users = len(all_users.data) if all_users.data else 0
+            # Get user statistics based on database type
+            if hasattr(self.db, 'use_sqlite') and self.db.use_sqlite:
+                # SQLite fallback mode
+                import sqlite3
+                with sqlite3.connect(self.db.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT COUNT(*) FROM users')
+                    total_users = cursor.fetchone()[0]
+            else:
+                # Supabase mode
+                all_users = self.db.supabase.table('users').select('*').execute()
+                total_users = len(all_users.data) if all_users.data else 0
             
             # Calculate revenue based on active subscriptions
             estimated_revenue = len(active_users) * self.subscription_price
