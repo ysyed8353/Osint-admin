@@ -184,16 +184,45 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
             target_user_id = int(context.args[0])
             payment_ref = context.args[1] if len(context.args) > 1 else f"ADMIN_GRANT_{datetime.now().strftime('%d%m%Y_%H%M')}"
             
-            # Check if user exists in database
+            # Check if user exists in database, create if not
             user_data = self.db.get_user(target_user_id)
             if not user_data:
-                await update.message.reply_text(
-                    f"❌ <b>User not found</b>\n\n"
-                    f"User ID <code>{target_user_id}</code> doesn't exist in the database.\n"
-                    "Ask the user to start the OSINT bot first: @{self.osint_bot_username}",
-                    parse_mode='HTML'
+                # Try to get user info from Telegram API
+                try:
+                    telegram_user = await context.bot.get_chat(target_user_id)
+                    first_name = telegram_user.first_name or "Unknown User"
+                    last_name = telegram_user.last_name
+                    username = telegram_user.username
+                    
+                    await update.message.reply_text(
+                        f"ℹ️ <b>Found user on Telegram</b>\n\n"
+                        f"👤 <b>Name:</b> {first_name}{' ' + last_name if last_name else ''}\n"
+                        f"🆔 <b>Username:</b> @{username if username else 'None'}\n"
+                        f"🔢 <b>User ID:</b> <code>{target_user_id}</code>\n\n"
+                        f"Adding to database...",
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    # Couldn't get user from Telegram, use placeholder
+                    first_name = "Unknown User"
+                    last_name = None
+                    username = None
+                    
+                    await update.message.reply_text(
+                        f"⚠️ <b>Could not fetch user details from Telegram</b>\n\n"
+                        f"User ID <code>{target_user_id}</code> will be added with placeholder data.\n"
+                        f"Details will be updated when they interact with @{self.osint_bot_username}",
+                        parse_mode='HTML'
+                    )
+                
+                # Create user entry in database for subscription management
+                self.db.add_user(
+                    user_id=target_user_id,
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name
                 )
-                return
+                user_data = self.db.get_user(target_user_id)
             
             # Grant subscription
             success = self.db.grant_subscription(
@@ -263,7 +292,9 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
             user_data = self.db.get_user(target_user_id)
             if not user_data:
                 await update.message.reply_text(
-                    f"❌ <b>User not found</b>\n\nUser ID <code>{target_user_id}</code> doesn't exist.",
+                    f"❌ <b>User not found</b>\n\n"
+                    f"User ID <code>{target_user_id}</code> doesn't exist in the database.\n"
+                    f"Cannot revoke subscription for non-existent user.",
                     parse_mode='HTML'
                 )
                 return
@@ -477,13 +508,29 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
                 
                 for i, user in enumerate(active_users[:10], 1):  # Show first 10
                     end_date = user['subscription_end_date'][:10] if user['subscription_end_date'] else 'N/A'
-                    username = user['username'] or 'N/A'
-                    text += f"{i}. @{username} - Expires: {end_date}\n"
+                    created_date = user['created_at'][:10] if user['created_at'] else 'N/A'
+                    
+                    # Status emoji (all active users get the active emoji)
+                    status_emoji = '✅'
+                    
+                    # User display logic for username
+                    username_display = f"@{user['username']}" if user['username'] else '@N/A'
+                    
+                    # Name display logic
+                    if user['first_name'] and user['first_name'] != 'Unknown User':
+                        name_display = user['first_name']
+                        if user['last_name']:
+                            name_display += f" {user['last_name']}"
+                    else:
+                        name_display = 'N/A'
+                    
+                    text += f"{i}. {status_emoji} {username_display} ({name_display})\n"
+                    text += f"   ID: <code>{user['user_id']}</code> | Joined: {created_date} | Expires: {end_date}\n\n"
                 
                 if len(active_users) > 10:
-                    text += f"\n... and {len(active_users) - 10} more users"
+                    text += f"... and {len(active_users) - 10} more users\n\n"
                 
-                text += f"\n💰 <b>Total Revenue:</b> ₹{len(active_users) * self.subscription_price:,.0f}"
+                text += f"💰 <b>Total Revenue:</b> ₹{len(active_users) * self.subscription_price:,.0f}"
             
             await query.edit_message_text(text, parse_mode='HTML')
             
@@ -514,8 +561,16 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
                 for i, user in enumerate(users, 1):
                     user_id, username, first_name, status, created = user
                     status_emoji = {'active': '✅', 'expired': '⏰', 'inactive': '🔒'}.get(status, '❓')
-                    username_display = username or 'N/A'
-                    text += f"{i}. {status_emoji} @{username_display} ({first_name})\n"
+                    
+                    # Better user display logic
+                    if username:
+                        user_display = f"@{username}"
+                    elif first_name and first_name != 'Unknown User':
+                        user_display = first_name
+                    else:
+                        user_display = f"User {user_id}"
+                    
+                    text += f"{i}. {status_emoji} {user_display}\n"
                     text += f"   ID: <code>{user_id}</code> | Joined: {created[:10]}\n\n"
             
             await query.edit_message_text(text, parse_mode='HTML')
