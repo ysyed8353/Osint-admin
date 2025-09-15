@@ -25,7 +25,6 @@ from telegram.ext import (
 import sys
 sys.path.append('.')
 from database import DatabaseManager
-from health_check import HealthCheckServer
 
 # Load environment variables
 load_dotenv()
@@ -62,28 +61,11 @@ class OSINTAdminBot:
         self.start_time = datetime.now()
         self.is_healthy = True
         
-        # Health check setup
-        self.health_server = HealthCheckServer(
-            port=int(os.getenv('PORT', '8001')),  # Different port for admin bot
-            bot_status_func=self.get_health_status
-        )
-        
         if not self.bot_token:
             raise ValueError("ADMIN_BOT_TOKEN not found in environment variables")
         
         if not self.admin_user_id:
             raise ValueError("ADMIN_USER_ID not found in environment variables")
-    
-    def get_health_status(self):
-        """Get admin bot health status for monitoring"""
-        uptime = (datetime.now() - self.start_time).total_seconds()
-        return {
-            'healthy': self.is_healthy,
-            'uptime': uptime,
-            'name': f'OSINT Admin Bot (@{self.admin_bot_username})',
-            'database': self.db is not None,
-            'admins': len(self.admin_user_ids)
-        }
     
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle errors in the admin bot"""
@@ -739,12 +721,8 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
             await query.edit_message_text("❌ Error revoking subscription")
     
     def run(self):
-        """Start the admin bot with health monitoring"""
+        """Start the admin bot"""
         try:
-            # Start health check server
-            self.health_server.start()
-            logger.info(f"Health check server started on port {self.health_server.port}")
-            
             # Create the Application
             application = Application.builder().token(self.bot_token).build()
             
@@ -771,13 +749,6 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
             logger.error(f"Error starting admin bot: {e}")
             self.is_healthy = False
             raise
-        finally:
-            # Cleanup health server
-            try:
-                self.health_server.stop()
-                logger.info("Health check server stopped")
-            except Exception as e:
-                logger.error(f"Error stopping health server: {e}")
 
 
 def main():
