@@ -410,19 +410,21 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
             active_users = self.db.get_all_active_users()
             total_revenue = len(active_users) * self.subscription_price
             
-            # Get additional stats from database
-            with self.db.db_path and open(self.db.db_path, 'r') if os.path.exists(self.db.db_path) else None:
-                pass  # Database exists
+            # Get total users from Supabase
+            all_users = self.db.supabase.table('users').select('user_id').execute()
+            total_users = len(all_users.data) if all_users.data else 0
             
             message = f"""
 📊 **OSINT Bot Statistics**
 
 **💰 Revenue & Subscriptions:**
 • **Active Subscriptions:** {len(active_users)}
+• **Total Users:** {total_users}
 • **Total Revenue:** ₹{total_revenue:,.0f}
 • **Average per User:** ₹{self.subscription_price}
 
 **📈 Performance:**
+• **Conversion Rate:** {(len(active_users)/total_users*100 if total_users > 0 else 0):.1f}%
 • **Subscription Price:** ₹{self.subscription_price}
 • **Subscription Duration:** {self.subscription_days} days
 • **Bot:** @{self.osint_bot_username}
@@ -523,25 +525,23 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
     async def show_all_users(self, query):
         """Show all users list"""
         try:
-            # Get all users from database
-            import sqlite3
-            with sqlite3.connect(self.db.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT user_id, username, first_name, subscription_status, created_at
-                    FROM users 
-                    ORDER BY created_at DESC
-                    LIMIT 15
-                ''')
-                users = cursor.fetchall()
+            # Get all users from Supabase database
+            users = self.db.supabase.table('users').select(
+                'user_id, username, first_name, subscription_status, created_at'
+            ).order('created_at', desc=True).limit(15).execute()
             
-            if not users:
+            if not users.data:
                 text = "📭 <b>No Users Found</b>\n\nNo users in the database yet."
             else:
-                text = f"📋 <b>All Users ({len(users)} shown)</b>\n\n"
+                text = f"📋 <b>All Users ({len(users.data)} shown)</b>\n\n"
                 
-                for i, user in enumerate(users, 1):
-                    user_id, username, first_name, status, created = user
+                for i, user in enumerate(users.data, 1):
+                    user_id = user['user_id']
+                    username = user.get('username')
+                    first_name = user.get('first_name')
+                    status = user.get('subscription_status', 'inactive')
+                    created = user.get('created_at', '')
+                    
                     status_emoji = {'active': '✅', 'expired': '⏰', 'inactive': '🔒'}.get(status, '❓')
                     
                     # Better user display logic
@@ -553,7 +553,7 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
                         user_display = f"User {user_id}"
                     
                     text += f"{i}. {status_emoji} {user_display}\n"
-                    text += f"   ID: <code>{user_id}</code> | Joined: {created[:10]}\n\n"
+                    text += f"   ID: <code>{user_id}</code> | Joined: {created[:10] if created else 'Unknown'}\n\n"
             
             await query.edit_message_text(text, parse_mode='HTML')
             
@@ -566,54 +566,33 @@ This is your admin control panel for managing @{self.osint_bot_username} subscri
         try:
             active_users = self.db.get_all_active_users()
             
-            # Get payment statistics
-            import sqlite3
-            with sqlite3.connect(self.db.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # Get total payments
-                cursor.execute('SELECT COUNT(*), SUM(amount) FROM payment_logs')
-                total_payments, total_revenue = cursor.fetchone()
-                
-                # Get today's payments
-                cursor.execute('''
-                    SELECT COUNT(*), SUM(amount) 
-                    FROM payment_logs 
-                    WHERE date(created_at) = date('now')
-                ''')
-                today_payments, today_revenue = cursor.fetchone()
-                
-                # Get this month's payments
-                cursor.execute('''
-                    SELECT COUNT(*), SUM(amount) 
-                    FROM payment_logs 
-                    WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
-                ''')
-                month_payments, month_revenue = cursor.fetchone()
+            # Get user statistics from Supabase
+            all_users = self.db.supabase.table('users').select('*').execute()
+            total_users = len(all_users.data) if all_users.data else 0
+            
+            # Calculate revenue based on active subscriptions
+            estimated_revenue = len(active_users) * self.subscription_price
             
             text = f"""
 💰 <b>Revenue Report</b>
 
 <b>📊 Current Status:</b>
 • Active Subscriptions: {len(active_users)}
-• Active Revenue: ₹{len(active_users) * self.subscription_price:,.0f}
+• Total Users: {total_users}
+• Estimated Monthly Revenue: ₹{estimated_revenue:,.0f}
 
-<b>💳 Payment Statistics:</b>
-• Total Payments: {total_payments or 0}
-• Total Revenue: ₹{total_revenue or 0:,.0f}
-
-<b>📅 Today:</b>
-• New Payments: {today_payments or 0}
-• Today's Revenue: ₹{today_revenue or 0:,.0f}
-
-<b>🗓️ This Month:</b>
-• Monthly Payments: {month_payments or 0}
-• Monthly Revenue: ₹{month_revenue or 0:,.0f}
-
-<b>📈 Metrics:</b>
+<b>💳 Subscription Details:</b>
 • Price per Subscription: ₹{self.subscription_price}
 • Subscription Duration: {self.subscription_days} days
-• Average Daily Revenue: ₹{(month_revenue or 0) / 30:,.0f}
+• Active vs Total: {len(active_users)}/{total_users}
+
+<b>� Metrics:</b>
+• Conversion Rate: {(len(active_users)/total_users*100 if total_users > 0 else 0):.1f}%
+• Estimated Daily Revenue: ₹{estimated_revenue/30:,.0f}
+
+<b>⚠️ Note:</b> 
+Payment tracking is not yet implemented in Supabase.
+Revenue figures are estimates based on active subscriptions.
 
 <b>Generated:</b> {datetime.now().strftime('%d %b %Y at %H:%M')}
             """
